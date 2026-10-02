@@ -1,0 +1,21 @@
+# 依赖与构建产物
+node_modules/
+dist/
+coverage/
+
+# 运行时环境变量与密钥（绝不进仓库）
+.env
+.env.*
+app.env
+*.pem
+*.key
+deploy_key
+deploy_key.pub
+.secrets/
+
+# 日志与编辑器
+*.log
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
