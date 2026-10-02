@@ -5,6 +5,22 @@
 框架只负责**触发和调用**，不关心项目怎么构建、怎么运行；一切具体部署逻辑都在服务器的
 `/srv/elicloud-deploy-test/deploy.sh` 里。
 
+## 本项目实际信息
+
+| 项 | 值 |
+|---|---|
+| 技术栈 | Node.js 22（`node:http`，零运行时依赖，无第三方包） |
+| 应用名 `<app>` | `elicloud-deploy-test` → 远程目录 `/srv/elicloud-deploy-test` |
+| 部署目标 | `146.56.237.33`（Ubuntu，Docker 29.8），SSH 用户 `deploy`，端口 `22` |
+| CI 命令 | `npm ci` → `npm run lint` → `npm test` → `npm run build`（产物 `dist/`） |
+| 镜像 | `ghcr.io/elipese568/elicloud-deploy-test:prod` 与 `:sha-<short>`（`DEPLOY_MODE=image`） |
+| 部署入口 | `/srv/elicloud-deploy-test/deploy.sh`（`deploy:deploy` 0750，每次由 Actions 上传覆盖） |
+| 运行时变量 | `/srv/elicloud-deploy-test/app.env`（`APP_VERSION` / `APP_REF` / `PORT`，0600 deploy:deploy） |
+| 密钥 | 仓库 Actions Secret `SSH_KEY`（部署私钥）；公钥在 `/home/deploy/.ssh/authorized_keys` |
+
+> `deploy/deploy.sh` 按框架约定只保留骨架；真实部署逻辑（拉镜像、切容器、滚动重启）由本项目
+> 写进该文件的「项目自定义部署逻辑」段，示例见 `VALIDATION.md`。
+
 ## 部署架构
 
 ```

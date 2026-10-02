@@ -10,7 +10,7 @@
   "scripts": {
     "start": "node src/server.js",
     "lint": "node --check src/server.js && node --check scripts/build.mjs && node --check test/server.test.js",
-    "test": "node --test test/",
+    "test": "node --test",
     "build": "node scripts/build.mjs"
   }
 }
