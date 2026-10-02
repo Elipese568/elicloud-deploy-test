@@ -69,7 +69,7 @@
 
 3. **填写 GitHub 配置**：Secrets（`SSH_HOST`/`SSH_USER`/`SSH_KEY`/`SSH_PORT`）、
    Variables（`DEPLOY_MODE`）、Environment `production`（带 Required reviewers）、
-   分支保护规则。详见仓库根的部署清单 / `references/github-setup.md`。
+   分支保护规则。具体值见本文档「GitHub 配置清单（本仓库实际值）」。
 
 4. **写实部署逻辑**：编辑仓库 `deploy/deploy.sh` 的「项目自定义部署逻辑」段，
    实现拉代码 / 装依赖 / 构建 / 重启服务。
@@ -79,6 +79,74 @@
 6. **首次发布**：GitHub → Actions → **Deploy to production** → *Run workflow*，
    `ref` 填 `prod`。人工审批通过后，Actions 会把 `deploy.sh` 上传到
    `/srv/elicloud-deploy-test/deploy.sh` 并执行。
+
+## GitHub 配置清单（本仓库实际值）
+
+### Secrets（Settings → Secrets and variables → Actions → Secrets）
+
+| Secret | 值 |
+|---|---|
+| `SSH_HOST` | `146.56.237.33` |
+| `SSH_USER` | `deploy` |
+| `SSH_PORT` | `22` |
+| `SSH_KEY` | 部署私钥全文（ed25519；公钥在服务器 `/home/deploy/.ssh/authorized_keys`） |
+| `GHCR_TOKEN` | 不需要（同仓库推 `ghcr.io` 用内置 `GITHUB_TOKEN`） |
+
+```bash
+gh secret set SSH_HOST --body '146.56.237.33'
+gh secret set SSH_USER --body 'deploy'
+gh secret set SSH_PORT --body '22'
+gh secret set SSH_KEY < ./deploy_key        # 部署私钥文件
+```
+
+### Variables（同页面 Variables 标签，**必须是仓库级**）
+
+| Variable | 值 | 说明 |
+|---|---|---|
+| `DEPLOY_MODE` | `image` | `image` → 阶段一构建并推镜像；其它值/留空 → 阶段一跳过，只跑阶段二 |
+
+```bash
+gh variable set DEPLOY_MODE --body 'image'
+```
+
+> `image` job 没有 `environment:`，读不到 Environment 级变量，所以 `DEPLOY_MODE` 必须配成仓库级。
+
+### Environment：`production`
+
+- **Required reviewers**：仓库所有者（部署前必须人工 Approve）
+- **Deployment branches**：仅 `prod`
+- ⚠️ 因为限制了部署分支，用 `workflow_dispatch` 回滚时**必须在 UI 里把分支选成 `prod`**；
+  用默认分支（main）会被策略直接拒绝，job 在 2 秒内失败且没有任何步骤日志。
+
+### 分支保护
+
+| 分支 | 规则 |
+|---|---|
+| `main` | 需要 PR；必过检查 `Test and build`（勾选 Require branches to be up to date）；禁 force push / 禁删除 |
+| `prod` | 需要 PR；必过检查 `Test and build` + `Guard prod source`；禁 force push / 禁删除；只允许从 main 发 PR（由 `Guard prod source` 强制） |
+
+> 两个坑（实测）：
+> 1. **免费版账号的 private 仓库无法使用分支保护与 Required reviewers**（API 返回 403/422），
+>    必须把仓库设为 public 或升级 GitHub Pro。本仓库为 public。
+> 2. 单账号**无法给自己的 PR 审批**，所以 `required_approving_review_count` 目前设为 0
+>    （仍是"必须走 PR"）。加了协作者之后建议调到 1（main）/ 2（prod）。
+
+## 配置与密钥放置表
+
+| 变量 / 配置 | 位置 | 用途 |
+|---|---|---|
+| `SSH_HOST` / `SSH_USER` / `SSH_PORT` | GitHub Secrets | Actions 连哪台机器、以谁登录 |
+| `SSH_KEY` | GitHub Secrets | 部署私钥（Actions 侧唯一凭据） |
+| 对应公钥 | 服务器 `/home/deploy/.ssh/authorized_keys`（600） | 校验上面的私钥 |
+| `GITHUB_TOKEN` | Actions 内置，无需配置 | 同仓库推 `ghcr.io` 镜像（靠 `packages: write`） |
+| `DEPLOY_MODE` | GitHub Variables（仓库级） | `image` → 阶段一构建推镜像 |
+| `APP_VERSION` / `APP_REF` / `PORT` | 服务器 `/srv/elicloud-deploy-test/app.env`（600，deploy:deploy） | 应用运行时变量，由 `deploy.sh` 读出后用 `-e` 传给容器 |
+| 数据库口令、第三方 API Key 等 | 服务器 `/srv/elicloud-deploy-test/app.env` | 不进仓库、不进 Actions |
+| 部署 ref（`prod` / tag / commit SHA） | 由 Actions 作为参数传给 `deploy.sh` | 决定这次部署哪个版本 |
+| 人工运维私钥 | 本机 `~/.ssh/`（如 `C:\Users\<you>\.ssh\...`） | 仅供人登录服务器，与 Actions 无关 |
+
+规则：**部署环节的凭据只走 GitHub Secrets；应用运行时的变量只在服务器 `app.env`。**
+两边都不要写进仓库，也不要在 workflow 里 `echo` 出来。
 
 ## 日常发布流程
 
@@ -98,6 +166,10 @@ git push -u origin feature/xxx        # 开 PR → main，等 CI 通过并合并
 1. **GitHub Actions 回滚（推荐）**
    Actions → *Deploy to production* → *Run workflow* →
    `ref` 填上一个可用版本：`prod` 之前的 tag（如 `v1.3.0`）、commit SHA，或分支名。
+   - ⚠️ UI 里的**分支必须选 `prod`**：Environment 的 Deployment branches 只允许 `prod`，
+     用默认分支 dispatch 会被策略直接拒绝（job 2 秒失败、无步骤日志）。
+   - ⚠️ `DEPLOY_MODE=image` 时阶段一仍会按**触发分支**构建并把 `:prod` 重新指向它，
+     只有 `deploy.sh` 收到旧 ref。详见 `VALIDATION.md` D4。
 
 2. **服务器上手工回滚**
    ```bash
